@@ -1,0 +1,35 @@
+#ifndef XXHASH_H
+#define XXHASH_H
+#include <cstdint>
+
+#define PRIME1 2654435761U
+#define PRIME2 2246822519U
+#define PRIME3 3266489917U
+#define PRIME4 668265263U
+#define PRIME5 374761393U
+
+__host__ __device__ inline uint32_t rotate_left(uint32_t v, uint32_t n) {
+  return (v << n) | (v >> (32 - n));
+}
+
+__host__ __device__ uint32_t xxhash(uint32_t seed, uint32_t v) {
+  uint32_t acc = seed + PRIME5;
+
+  acc = acc + v * PRIME3;
+  acc = rotate_left(acc, 17) * PRIME4;
+
+  uint8_t *byte = (uint8_t *)(&v);
+  for (uint32_t i = 0; i < 4; i += 1) {
+    acc = acc + byte[i] * PRIME5;
+    acc = rotate_left(acc, 11) * PRIME1;
+  }
+
+  acc ^= acc >> 15;
+  acc *= PRIME2;
+  acc ^= acc >> 13;
+  acc *= PRIME3;
+  acc ^= acc >> 16;
+
+  return acc;
+}
+#endif

@@ -1,0 +1,188 @@
+#ifndef CU_CUCKOO_SERIAL_HCU
+#define CU_CUCKOO_SERIAL_HCU
+#include "utils.hcu"
+#include "xxhash.hcu"
+class CuckooSerialHashTable : public HashTable
+{
+public:
+    using HashTable::HashTable;
+    
+    int insert(uint32_t *key, uint32_t size) override;
+    
+    void lookup(uint32_t *key, bool *result, uint32_t size) override;
+    
+    void remove(uint32_t *key, uint32_t size) override;
+    
+    void info() override;
+
+private:
+    // do hash
+    inline uint32_t hash(uint32_t key, uint32_t func_idx);
+    
+    void gen_hash_func_seeds();
+
+    int rehash(uint32_t val_in_hand, uint32_t depth);
+
+    int insert_cuckoo(uint32_t key, uint32_t depth);
+
+    bool lookup_cuckoo(uint32_t key);
+
+    void remove_cuckoo(uint32_t key);
+};
+
+int CuckooSerialHashTable::insert(uint32_t *key, uint32_t size)
+{
+    int max_level = 0;
+    for (int i = 0; i < size; i++)
+    {
+        int level = insert_cuckoo(key[i], 0);
+        if (level == ERR_DEPTH)
+        {
+            printf("insert failed\n");
+            return ERR_DEPTH;
+        }
+        if (level > max_level)
+        {
+            max_level = level;
+        }
+    }
+    return max_level;
+}
+
+void CuckooSerialHashTable::lookup(uint32_t *key, bool *result, uint32_t size)
+{
+    for (int i = 0; i < size; i++)
+    {
+        result[i] = lookup_cuckoo(key[i]);
+    }
+}
+
+void CuckooSerialHashTable::remove(uint32_t *key, uint32_t size)
+{
+    for (int i = 0; i < size; i++)
+    {
+        remove_cuckoo(key[i]);
+    }
+}
+
+void CuckooSerialHashTable::info() {}
+
+void CuckooSerialHashTable::remove_cuckoo(uint32_t key)
+{
+    for (int i = 1; i < hash_func_num; i++)
+    {
+        int pos = hash(key, i);
+        if (data[pos] == key)
+        {
+            data[pos] = EMPTY_CELL;
+            pos_to_func_map[pos] = EMPTY_CELL;
+        }
+    }
+}
+
+bool CuckooSerialHashTable::lookup_cuckoo(uint32_t key)
+{
+    for (int i = 1; i < hash_func_num; i++)
+    {
+        int pos = hash(key, i);
+        if (data[pos] == key)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+int CuckooSerialHashTable::insert_cuckoo(uint32_t key, uint32_t depth)
+{
+    uint32_t cur_key = key;
+    uint32_t cur_func = 1;
+    int evict_count = 0;
+    do
+    {
+        for (int i = 0; i < hash_func_num; ++i)
+        {
+            int func_idx = (cur_func + i - 1) % hash_func_num + 1;
+            int pos = hash(cur_key, func_idx);
+            if (this->data[pos] == EMPTY_CELL)
+            { // Empty cell found.
+                this->data[pos] = cur_key;
+                this->pos_to_func_map[pos] = func_idx;
+                return 0;
+            }
+        }
+
+        // then we must kick off the key in the first slot
+        int pos = hash(cur_key, cur_func);
+        std::swap(cur_key, this->data[pos]);
+        std::swap(cur_func, this->pos_to_func_map[pos]);
+        cur_func = cur_func % this->hash_func_num + 1;
+        evict_count++;
+    } while (evict_count < evict_bound);
+    // if we reach here, we have to rehash
+    int levels_beneath = rehash(cur_key, depth + 1);
+    if (levels_beneath == ERR_DEPTH)
+    {
+        return ERR_DEPTH;
+    }
+    else
+    {
+        return levels_beneath + 1;
+    }
+}
+
+int CuckooSerialHashTable::rehash(uint32_t val_in_hand, uint32_t depth)
+{
+    // if depth > MAX_DEPTH, return ERR_DEPTH and abort
+    if (depth > MAX_DEPTH)
+    {
+        return ERR_DEPTH;
+    }
+    // regenerate hash function seeds
+    this->gen_hash_func_seeds();
+    // save old data to val_buffer
+    std::vector<uint32_t> val_buffer;
+    for (int i = 0; i < size; i++)
+    {
+        if (data[i] != EMPTY_CELL)
+        {
+            val_buffer.push_back(data[i]);
+        }
+        data[i] = EMPTY_CELL;
+        this->pos_to_func_map[i] = EMPTY_CELL;
+    }
+    // save val_in_hand
+    val_buffer.push_back(val_in_hand);
+    // reinsert all values
+    int max_level_beneath = 0;
+    for (auto val : val_buffer)
+    {
+        int level_beneath = this->insert_cuckoo(val, size);
+        // if insert failed, return ERR_DEPTH and abort
+        if (level_beneath == ERR_DEPTH)
+        {
+            return ERR_DEPTH;
+        }
+        if (level_beneath > max_level_beneath)
+        {
+            max_level_beneath = level_beneath;
+        }
+    }
+    return max_level_beneath;
+}
+
+void CuckooSerialHashTable::gen_hash_func_seeds()
+{
+    for (uint32_t i = 1; i <= hash_func_num; i++)
+    {
+        hash_func_seeds[i] = rand();
+    }
+}
+
+inline uint32_t CuckooSerialHashTable::hash(uint32_t key, uint32_t func_idx)
+{
+    uint32_t seed = hash_func_seeds[func_idx];
+    uint32_t hash_val = xxhash(seed, key);
+    return hash_val % this->size;
+}
+#endif

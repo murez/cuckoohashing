@@ -1,0 +1,91 @@
+#ifndef UTILS_HCU
+#define UTILS_HCU
+#include <cstdint>
+#include <cstdlib>
+#include <cstdio>
+#include <vector>
+#include <algorithm>
+#include <assert.h>
+#include <string>
+#include "curand.h"
+#include "xxhash.hcu"
+#define MAX_DEPTH (100)
+#define ERR_DEPTH (-1)
+#define EMPTY_CELL (0)
+
+class HashTable
+{
+public:
+    HashTable(uint32_t size, uint32_t evict_bound, uint32_t num_funcs);
+    ~HashTable();
+    virtual int insert(uint32_t *key, uint32_t size) = 0;
+    virtual void lookup(uint32_t *key, bool *result, uint32_t size) = 0;
+    virtual void remove(uint32_t *key, uint32_t size) = 0;
+    virtual void info() = 0;
+
+protected:
+    uint32_t *data;
+    uint32_t size;
+    //
+    uint32_t evict_bound;
+    uint32_t hash_func_num;
+
+    uint32_t *pos_to_func_map;
+    uint32_t *hash_func_seeds;
+};
+
+template <typename T>
+void do_swap(T &a, T &b)
+{
+    T tmp = a;
+    a = b;
+    b = tmp;
+}
+
+HashTable::HashTable(uint32_t size, uint32_t evict_bound, uint32_t num_funcs) : size(size), evict_bound(evict_bound), hash_func_num(num_funcs)
+{
+    data = new uint32_t[size];
+    pos_to_func_map = new uint32_t[size];
+    hash_func_seeds = new uint32_t[hash_func_num + 1];
+}
+
+HashTable::~HashTable()
+{
+    delete[] data;
+    delete[] pos_to_func_map;
+    delete[] hash_func_seeds;
+}
+
+void test_xxhash()
+{
+    assert(xxhash(12, 12) == 245702375);
+}
+
+void test_hashtable(std::string class_name, HashTable &x)
+{
+    printf("[testing]: test %s\n", class_name.c_str());
+    uint32_t keys[12] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+    x.insert(keys, 12);
+    keys[0] = 12;
+    bool lookup_result[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    x.lookup(keys, lookup_result, 12);
+
+    assert(("[failed]:" + class_name + " lookup failed", lookup_result[0] == 0));
+
+    for (int i = 1; i < 12; i++)
+    {
+        assert(("[failed]: " + class_name + " lookup failed", lookup_result[i] == 1));
+    }
+    uint32_t delete_list[4] = {1, 2, 3, 4};
+    bool delete_result[4] = {0, 0, 0, 0};
+    x.remove(delete_list, 4);
+    x.lookup(delete_list, delete_result, 4);
+    for (int i = 0; i < 4; i++)
+    {
+        assert(("[failed]: " + class_name + " remove failed", delete_result[i] == 0));
+    }
+    printf("[success]: %s test success\n", class_name.c_str());
+    printf("\n");
+}
+
+#endif
