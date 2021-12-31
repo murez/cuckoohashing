@@ -7,11 +7,23 @@
 #include <algorithm>
 #include <assert.h>
 #include <string>
-#include "curand.h"
 #include "xxhash.hcu"
+#include <curand.h>
+#include <curand_kernel.h>
+#include <math.h>
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
+#include <thrust/sequence.h>
+#include <thrust/sort.h>
+#include <ctime>
+#include <iostream>
+#include <random>
+#include <functional>
 #define MAX_DEPTH (100)
 #define ERR_DEPTH (-1)
 #define EMPTY_CELL (0)
+#define BLOCK_SIZE (256)
+#define clog2(x) ceil(log2((double)x))
 
 class HashTable
 {
@@ -32,6 +44,8 @@ protected:
 
     uint32_t *pos_to_func_map;
     uint32_t *hash_func_seeds;
+    
+    virtual void gen_hash_func_seeds() = 0;
 };
 
 template <typename T>
@@ -47,6 +61,7 @@ HashTable::HashTable(uint32_t size, uint32_t evict_bound, uint32_t num_funcs) : 
     data = new uint32_t[size];
     pos_to_func_map = new uint32_t[size];
     hash_func_seeds = new uint32_t[hash_func_num + 1];
+    
 }
 
 HashTable::~HashTable()
@@ -54,6 +69,52 @@ HashTable::~HashTable()
     delete[] data;
     delete[] pos_to_func_map;
     delete[] hash_func_seeds;
+}
+
+inline double time_func(std::function<void()> f) {
+    float duration;
+    cudaEvent_t start, stop;
+
+    cudaEventCreate(&start);
+    cudaEventRecord(start, 0);
+
+    // auto start = Clock::now();
+
+    f();
+
+    // auto end = Clock::now();
+    // auto nano = duration_cast<nanoseconds>(end - start).count();
+
+    cudaEventCreate(&stop);
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+
+    cudaEventElapsedTime(&duration, start, stop);
+
+    return (double) (duration);
+}
+
+
+void generate_unique_random(uint32_t *data, uint32_t size, float alpha=1.5)
+{
+    std::mt19937 mt(time(nullptr));
+    uint32_t offset = 1 + mt() % (1 << 10);
+    uint32_t bigger_size = size * alpha;
+    uint32_t *tmp = new uint32_t[bigger_size];
+    for (uint32_t i = 0; i < bigger_size; i++)
+    {
+        tmp[i] = i + offset;
+    }
+    for (uint32_t i = 0; i < bigger_size; i++)
+    {
+        uint32_t j = mt() % (bigger_size - i);
+        do_swap(tmp[i], tmp[j]);
+    }
+    for (uint32_t i = 0; i < size; i++)
+    {
+        data[i] = tmp[i];
+    }
+    delete[] tmp;
 }
 
 void test_xxhash()

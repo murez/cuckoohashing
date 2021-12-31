@@ -6,21 +6,24 @@ class CuckooSerialHashTable : public HashTable
 {
 public:
     using HashTable::HashTable;
-    
+
+    CuckooSerialHashTable(uint32_t size, uint32_t evict_bound, uint32_t num_funcs);
+
+
     int insert(uint32_t *key, uint32_t size) override;
-    
+
     void lookup(uint32_t *key, bool *result, uint32_t size) override;
-    
+
     void remove(uint32_t *key, uint32_t size) override;
-    
+
     void info() override;
+
+protected:
+    void gen_hash_func_seeds() override;
 
 private:
     // do hash
     inline uint32_t hash(uint32_t key, uint32_t func_idx);
-    
-    void gen_hash_func_seeds();
-
     int rehash(uint32_t val_in_hand, uint32_t depth);
 
     int insert_cuckoo(uint32_t key, uint32_t depth);
@@ -29,6 +32,12 @@ private:
 
     void remove_cuckoo(uint32_t key);
 };
+
+CuckooSerialHashTable::CuckooSerialHashTable(uint32_t size, uint32_t evict_bound, uint32_t num_funcs):
+        HashTable(size, evict_bound, num_funcs)
+    {
+        gen_hash_func_seeds();
+    }
 
 int CuckooSerialHashTable::insert(uint32_t *key, uint32_t size)
 {
@@ -175,7 +184,7 @@ void CuckooSerialHashTable::gen_hash_func_seeds()
 {
     for (uint32_t i = 1; i <= hash_func_num; i++)
     {
-        hash_func_seeds[i] = rand();
+        hash_func_seeds[i] = rand() % PRIME5;
     }
 }
 

@@ -12,7 +12,7 @@ __host__ __device__ inline uint32_t rotate_left(uint32_t v, uint32_t n) {
   return (v << n) | (v >> (32 - n));
 }
 
-__host__ __device__ uint32_t xxhash(uint32_t seed, uint32_t v) {
+__host__ __device__ inline uint32_t xxhash(uint32_t seed, uint32_t v) {
   uint32_t acc = seed + PRIME5;
 
   acc = acc + v * PRIME3;
