@@ -25,12 +25,9 @@ int main()
     // test_cuckoo_cuda();
     // bench_task1_cuckoo();
     // bench_task2_cuckoo();
-    bench_task3_cuckoo();
+    // bench_task3_cuckoo();
     bench_task4_cuckoo();
-    // bench_task1_cuckoo_serial();
-    // bench_task2_cuckoo_serial();
-    // bench_task3_cuckoo_serial();
-    // bench_task4_cuckoo_serial();
+    return 0;
 }
 
 void bench_task1_cuckoo()
@@ -71,8 +68,7 @@ void bench_task1_cuckoo()
                 duration_serial[rep] = time_func([&]
                                                  { level_serial = ht_serial.insert(input_keys, n); });
                 duration_cuda[rep] = time_func([&]
-                                               { level_cuda = ht_cuda.insert(input_keys, n); }) /
-                                     5;
+                                               { level_cuda = ht_cuda.insert(input_keys, n); });
 
                 printf("hash-func-num %-10d scale %-10d repeat-times %-10d serial time: %-10lf rehash %-10d cuda time: %-10lf rehash %-10d\n", num_funcs, scale, rep, duration_serial[rep], level_serial, duration_cuda[rep], level_cuda);
             }
@@ -151,7 +147,7 @@ void bench_task2_cuckoo()
                                                { ht_cuda.lookup(lookup_values, results, n); });
                 printf("hash-func-num %-10d percent %-5d repeat-times %-10d serial time: %-10lf cuda time: %-10lf\n", num_funcs, percent * 10, rep, duration_serial[rep], duration_cuda[rep]);
             }
-            
+
             double mean_serial = average(duration_serial, 5);
             double stddev_serial = standardDev(duration_serial, 5);
 
@@ -171,7 +167,6 @@ void bench_task2_cuckoo()
             record_cuda.put(mean_cuda);
             record_cuda.put(stddev_cuda);
             cuda_writer.insertRecord(record_cuda);
-
         }
         delete[] insert_values;
         delete[] lookup_values;
@@ -216,10 +211,9 @@ void bench_task3_cuckoo()
                 int level_serial;
                 int level_cuda;
                 duration_serial[rep] = time_func([&]
-                                            { level_serial = ht_serial.insert(insert_values, n); });
+                                                 { level_serial = ht_serial.insert(insert_values, n); });
                 duration_cuda[rep] = time_func([&]
-                                               { level_cuda = ht_cuda.insert(insert_values, n); }) /
-                                     3.5;
+                                               { level_cuda = ht_cuda.insert(insert_values, n); });
                 printf("hash-func-num %-10d ratios %-10lf repeat-times %-10d serial time: %-10lf rehash %-10d cuda time: %-10lf rehash %-10d\n", num_funcs, ratios[ri], rep, duration_serial[rep], level_serial, duration_cuda[rep], level_cuda);
             }
             double mean_serial = average(duration_serial, 5);
@@ -281,9 +275,9 @@ void bench_task4_cuckoo()
                 int level_serial;
                 int level_cuda;
                 duration_serial[rep] = time_func([&]
-                                            { level_serial = ht_serial.insert(insert_values, n); });
+                                                 { level_serial = ht_serial.insert(insert_values, n); });
                 duration_cuda[rep] = time_func([&]
-                                               { level_cuda = ht_cuda.insert(insert_values, n); }) /
+                                               { level_cuda = ht_cuda.insert(insert_values, n); });
                 printf("hash-func-num %-10d bound-mul %-10d repeat-times %-10d serial time: %-10lf rehash %-10d cuda time: %-10lf rehash %-10d\n", num_funcs, bound_mul, rep, duration_serial[rep], level_serial, duration_cuda[rep], level_cuda);
             }
             double mean_serial = average(duration_serial, 5);
