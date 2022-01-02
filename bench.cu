@@ -23,9 +23,9 @@ int main()
     // test_xxhash();
     // test_cuckoo_serial();
     // test_cuckoo_cuda();
-    // bench_task1_cuckoo();
-    // bench_task2_cuckoo();
-    // bench_task3_cuckoo();
+    bench_task1_cuckoo();
+    bench_task2_cuckoo();
+    bench_task3_cuckoo();
     bench_task4_cuckoo();
     return 0;
 }
