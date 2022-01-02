@@ -158,6 +158,22 @@ int cal_evict_bound(uint32_t n, uint32_t table_size)
 
 But it doesn't have a good result with my code, So we can study this in the future.
 
+## ref
+
+https://github.com/cudpp/cudpp/blob/master/src/cudpp_hash/hash_table.cpp
+
+https://github.com/cudpp/cudpp
+
+https://arxiv.org/pdf/1712.09494.pdf
+
+https://github.com/Cyan4973/xxHash
+
+https://github.com/Cyan4973/xxHash/wiki/Collision-ratio-comparison#collision-study
+
+https://hal.inria.fr/inria-00624777/document
+
+https://mdsoar.org/bitstream/handle/11603/20126/paper.pdf?sequence=6&isAllowed=y
+
 ## raw data
 
 ### task 1
