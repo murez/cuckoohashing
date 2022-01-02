@@ -19,10 +19,11 @@ public:
     void info() override;
 
 protected:
-    void gen_hash_func_seeds() override;
+    void gen_hash_func_seeds();
 
 private:
     // do hash
+
     inline uint32_t hash(uint32_t key, uint32_t func_idx);
     int rehash(uint32_t val_in_hand, uint32_t depth);
 
@@ -33,8 +34,7 @@ private:
     void remove_cuckoo(uint32_t key);
 };
 
-CuckooSerialHashTable::CuckooSerialHashTable(uint32_t size, uint32_t evict_bound, uint32_t num_funcs):
-        HashTable(size, evict_bound, num_funcs)
+CuckooSerialHashTable::CuckooSerialHashTable(uint32_t size, uint32_t evict_bound, uint32_t num_funcs):HashTable(size, evict_bound, num_funcs)
     {
         gen_hash_func_seeds();
     }
@@ -47,7 +47,7 @@ int CuckooSerialHashTable::insert(uint32_t *key, uint32_t size)
         int level = insert_cuckoo(key[i], 0);
         if (level == ERR_DEPTH)
         {
-            printf("insert failed\n");
+            // printf("insert failed\n");
             return ERR_DEPTH;
         }
         if (level > max_level)
@@ -182,9 +182,10 @@ int CuckooSerialHashTable::rehash(uint32_t val_in_hand, uint32_t depth)
 
 void CuckooSerialHashTable::gen_hash_func_seeds()
 {
+    std::mt19937 mt(time(nullptr));
     for (uint32_t i = 1; i <= hash_func_num; i++)
     {
-        hash_func_seeds[i] = rand() % PRIME5;
+        hash_func_seeds[i] = mt();
     }
 }
 

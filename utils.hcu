@@ -19,11 +19,16 @@
 #include <iostream>
 #include <random>
 #include <functional>
+#include <cmath>
+#include <chrono>
+#include <ctime>
+#include <cstdlib>
 #define MAX_DEPTH (100)
 #define ERR_DEPTH (-1)
 #define EMPTY_CELL (0)
 #define BLOCK_SIZE (256)
 #define clog2(x) ceil(log2((double)x))
+#define REPEAT_TIMES 5
 
 class HashTable
 {
@@ -44,8 +49,8 @@ protected:
 
     uint32_t *pos_to_func_map;
     uint32_t *hash_func_seeds;
-    
-    virtual void gen_hash_func_seeds() = 0;
+
+    // virtual void gen_hash_func_seeds() = 0;
 };
 
 template <typename T>
@@ -61,7 +66,6 @@ HashTable::HashTable(uint32_t size, uint32_t evict_bound, uint32_t num_funcs) : 
     data = new uint32_t[size];
     pos_to_func_map = new uint32_t[size];
     hash_func_seeds = new uint32_t[hash_func_num + 1];
-    
 }
 
 HashTable::~HashTable()
@@ -71,31 +75,32 @@ HashTable::~HashTable()
     delete[] hash_func_seeds;
 }
 
-inline double time_func(std::function<void()> f) {
+inline double time_func(std::function<void()> f)
+{
     float duration;
-    cudaEvent_t start, stop;
+    // cudaEvent_t start, stop;
 
-    cudaEventCreate(&start);
-    cudaEventRecord(start, 0);
+    // cudaEventCreate(&start);
+    // cudaEventRecord(start, 0);
 
-    // auto start = Clock::now();
+    auto start = std::chrono::system_clock::now();
 
     f();
 
-    // auto end = Clock::now();
-    // auto nano = duration_cast<nanoseconds>(end - start).count();
+    auto end = std::chrono::system_clock::now();
+    auto nano =  std::chrono::duration<double>(end - start).count();
 
-    cudaEventCreate(&stop);
-    cudaEventRecord(stop, 0);
-    cudaEventSynchronize(stop);
+    // cudaEventCreate(&stop);
+    // cudaEventRecord(stop, 0);
+    // cudaEventSynchronize(stop);
 
-    cudaEventElapsedTime(&duration, start, stop);
+    // cudaEventElapsedTime(&duration, start, stop);
 
-    return (double) (duration);
+    // return (double)(duration);
+    return (double)(nano);
 }
 
-
-void generate_unique_random(uint32_t *data, uint32_t size, float alpha=1.5)
+void generate_unique_random(uint32_t *data, uint32_t size, float alpha = 1.5)
 {
     std::mt19937 mt(time(nullptr));
     uint32_t offset = 1 + mt() % (1 << 10);
@@ -135,6 +140,7 @@ void test_hashtable(std::string class_name, HashTable &x)
 
     for (int i = 1; i < 12; i++)
     {
+        printf("%d ", lookup_result[i]);
         assert(("[failed]: " + class_name + " lookup failed", lookup_result[i] == 1));
     }
     uint32_t delete_list[4] = {1, 2, 3, 4};
@@ -149,4 +155,25 @@ void test_hashtable(std::string class_name, HashTable &x)
     printf("\n");
 }
 
+double average(double *x, int len)
+{
+    double sum = 0;
+    for (int i = 0; i < len; i++)
+        sum += x[i];
+    return sum / len;
+}
+
+double variance(double *x, int len)
+{
+    double avg = average(x, len), sum;
+    for (int i = 0; i < len; i++)
+        sum += pow(x[i] - avg, 2);
+    return sum / len;
+}
+
+double standardDev(double *x, int len)
+{
+    double var = variance(x, len);
+    return sqrt(var);
+}
 #endif

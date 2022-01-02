@@ -1,7 +1,7 @@
 #ifndef XXHASH_H
 #define XXHASH_H
 #include <cstdint>
-
+#include "cuda.h"
 #define PRIME1 2654435761U
 #define PRIME2 2246822519U
 #define PRIME3 3266489917U

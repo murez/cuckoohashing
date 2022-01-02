@@ -1,0 +1,326 @@
+#ifndef CU_CUCKOO_CUDA_NATIVE_HCU
+#define CU_CUCKOO_CUDA_NATIVE_HCU
+#include "utils.hcu"
+#include "xxhash.hcu"
+#include "cuda.h"
+class CuckooCudaHashTable : public HashTable
+{
+public:
+    using HashTable::HashTable;
+
+    CuckooCudaHashTable(uint32_t size, uint32_t evict_bound, uint32_t num_funcs);
+
+    int insert(uint32_t *key, uint32_t size) override;
+    // TODO
+    void lookup(uint32_t *key, bool *result, uint32_t size) override;
+    // TODO
+    void remove(uint32_t *key, uint32_t size) override;
+    // TODO
+    void info() override;
+
+protected:
+    void gen_hash_func_seeds();
+
+private:
+    int pos_width;
+    int cuckoo_insert(uint32_t *key, uint32_t size, uint32_t depth);
+    int rehash(uint32_t *key, uint32_t size, uint32_t depth);
+};
+
+CuckooCudaHashTable::CuckooCudaHashTable(uint32_t size, uint32_t evict_bound, uint32_t num_funcs)
+    : HashTable(size, evict_bound, num_funcs), pos_width(clog2(hash_func_num))
+{
+    delete[] this->data;
+    this->data = new uint32_t[hash_func_num * this->size];
+    gen_hash_func_seeds();
+}
+
+
+
+__device__ static inline uint32_t device_hash(uint32_t *hash_seeds, uint32_t func_index, uint32_t val, uint32_t size)
+{
+    return xxhash(hash_seeds[func_index], val) % size;
+}
+
+__device__ __host__ static inline uint32_t makedata(uint32_t val, uint32_t func_index, int pos_width)
+{
+    return (val << pos_width) ^ func_index;
+}
+
+__device__ __host__ static inline uint32_t getkey(uint32_t val, int pos_width)
+{
+    return val >> pos_width;
+}
+
+__device__ __host__ static inline uint32_t getfunidx(uint32_t val, int pos_width)
+{
+    return val & ((1 << pos_width) - 1);
+}
+
+__global__ void cuckoo_cuda_insert_kernal(uint32_t *d_keys,
+                                          uint32_t key_size,
+                                          uint32_t *d_data,
+                                          uint32_t data_size,
+                                          uint32_t *d_hash_func_seeds,
+                                          uint32_t hash_func_num,
+                                          const int evict_bound,
+                                          const int pos_width,
+                                          int *rehash_count)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (idx < key_size)
+    {
+        uint32_t cur_val = d_keys[idx];
+        int cur_func = 0;
+        int evict_count = 0;
+        do
+        {   
+            int pos = device_hash(d_hash_func_seeds, cur_func, cur_val, data_size);
+            uint32_t old_data = atomicExch(&d_data[cur_func * data_size + pos], makedata(cur_val, cur_func, pos_width));
+            if (old_data != EMPTY_CELL)
+            {
+                cur_val = getkey(old_data, pos_width);
+                cur_func = (getfunidx(old_data, pos_width) + 1) % hash_func_num;
+                evict_count++;
+            }
+            else
+                return;
+        } while (evict_count < hash_func_num * evict_bound);
+
+        atomicAdd(rehash_count, 1);
+    }
+}
+
+__global__ void cuckoo_cuda_lookup_kernal(uint32_t *d_keys,
+                                          uint32_t key_size,
+                                          uint32_t *d_data,
+                                          uint32_t data_size,
+                                          uint32_t *d_hash_func_seeds,
+                                          uint32_t hash_func_num,
+                                          const int pos_width,
+                                          bool *result)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (idx < key_size)
+    {
+        uint32_t cur_val = d_keys[idx];
+        for (int i = 0; i < hash_func_num; i++)
+        {
+            int pos = device_hash(d_hash_func_seeds, i, cur_val, data_size);
+            if (getkey(d_data[i * data_size + pos], pos_width) == cur_val)
+            {
+                result[idx] = true;
+                return;
+            }
+        }
+        result[idx] = false;
+    }
+}
+
+__global__ void cuckoo_cuda_remove_kernal(uint32_t *d_keys,
+                                          uint32_t key_size,
+                                          uint32_t *d_data,
+                                          uint32_t data_size,
+                                          uint32_t *d_hash_func_seeds,
+                                          uint32_t hash_func_num,
+                                          const int pos_width)
+{
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (idx < key_size)
+    {
+        uint32_t cur_val = d_keys[idx];
+        for (int i = 0; i < hash_func_num; i++)
+        {
+            int pos = device_hash(d_hash_func_seeds, i, cur_val, data_size);
+            if (getkey(d_data[i * data_size + pos], pos_width) == cur_val)
+            {
+                d_data[i * data_size + pos] = EMPTY_CELL;
+                return;
+            }
+        }
+    }
+}
+
+int CuckooCudaHashTable::insert(uint32_t *key, uint32_t size)
+{
+    int level = cuckoo_insert(key, size, 0);
+    if (level == ERR_DEPTH)
+    {
+        printf("CuckooCudaHashTable::insert: depth limit exceeded\n");
+    }
+    return level;
+}
+
+void CuckooCudaHashTable::lookup(uint32_t *key, bool *result, uint32_t size) {
+    uint32_t *device_keys;
+    uint32_t *device_data;
+    bool *device_result;
+    uint32_t *device_hash_func_seeds;
+    // malloc
+    cudaMalloc((void **)&device_keys, size * sizeof(uint32_t));
+    cudaMalloc((void **)&device_data, this->hash_func_num * this->size * sizeof(uint32_t));
+    cudaMalloc((void **)&device_result, size * sizeof(bool));
+    cudaMalloc((void **)&device_hash_func_seeds, this->hash_func_num * sizeof(uint32_t));
+    // cpy
+    cudaMemcpy(device_keys, key, size * sizeof(uint32_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(device_data, this->data, this->size * hash_func_num * sizeof(uint32_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(device_hash_func_seeds, hash_func_seeds, hash_func_num * sizeof(uint32_t), cudaMemcpyHostToDevice);
+    cuckoo_cuda_lookup_kernal<<<ceil(size / BLOCK_SIZE), BLOCK_SIZE>>>(device_keys, 
+                                                                       size,
+                                                                       device_data,
+                                                                       this->size,
+                                                                       device_hash_func_seeds,
+                                                                       this->hash_func_num, 
+                                                                       this->pos_width, 
+                                                                       device_result);
+
+    cudaMemcpy(result, device_result, size * sizeof(bool), cudaMemcpyDeviceToHost);
+    cudaFree(device_keys);
+    cudaFree(device_data);
+    cudaFree(device_result);
+    cudaFree(device_hash_func_seeds);
+}
+
+void CuckooCudaHashTable::remove(uint32_t *key, uint32_t size) {
+    uint32_t *device_keys;
+    uint32_t *device_data;
+    uint32_t *device_hash_func_seeds;
+    // malloc
+    cudaMalloc((void **)&device_keys, size * sizeof(uint32_t));
+    cudaMalloc((void **)&device_data, this->hash_func_num * this->size * sizeof(uint32_t));
+    cudaMalloc((void **)&device_hash_func_seeds, this->hash_func_num * sizeof(uint32_t));
+    // cpy
+    cudaMemcpy(device_keys, key, size * sizeof(uint32_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(device_data, this->data, this->size * hash_func_num * sizeof(uint32_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(device_hash_func_seeds, hash_func_seeds, hash_func_num * sizeof(uint32_t), cudaMemcpyHostToDevice);
+    cuckoo_cuda_remove_kernal<<<ceil(size / BLOCK_SIZE), BLOCK_SIZE>>>(device_keys, 
+                                                                       size,
+                                                                       device_data,
+                                                                       this->size,
+                                                                       device_hash_func_seeds,
+                                                                       this->hash_func_num, 
+                                                                       this->pos_width);
+    cudaFree(device_keys);
+    cudaFree(device_data);
+    cudaFree(device_hash_func_seeds);
+}
+
+void CuckooCudaHashTable::info() {}
+
+int CuckooCudaHashTable::cuckoo_insert(uint32_t *key, uint32_t size, uint32_t depth)
+{
+    // create device ptr
+    uint32_t *device_keys;
+    uint32_t *device_data;
+    uint32_t *device_hash_func_seeds;
+    int rehash_times = 0;
+    int *device_rehash_times;
+    // allocate memory on device
+    cudaMalloc((void **)&device_keys, size * sizeof(uint32_t));
+    cudaMalloc((void **)&device_data, hash_func_num * this->size * sizeof(uint32_t));
+    cudaMalloc((void **)&device_hash_func_seeds, hash_func_num * sizeof(uint32_t));
+    cudaMalloc((void **)&device_rehash_times, sizeof(int));
+    // copy data from host to device
+    cudaMemcpy(device_keys, key, size * sizeof(uint32_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(device_data, this->data, this->size * hash_func_num * sizeof(uint32_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(device_hash_func_seeds, hash_func_seeds, hash_func_num * sizeof(uint32_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(device_rehash_times, &rehash_times, sizeof(int), cudaMemcpyHostToDevice);
+    // call kernel
+    cuckoo_cuda_insert_kernal<<<ceil(size / BLOCK_SIZE), BLOCK_SIZE>>>(device_keys,
+                                                                       size,
+                                                                       device_data,
+                                                                       this->size,
+                                                                       device_hash_func_seeds,
+                                                                       this->hash_func_num,
+                                                                       this->evict_bound,
+                                                                       this->pos_width,
+                                                                       device_rehash_times);
+    // copy data from device to host
+    // cudaMemcpy(key, device_keys, size * sizeof(uint32_t), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(this->data, device_data, this->size * hash_func_num * sizeof(uint32_t), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(hash_func_seeds, device_hash_func_seeds, hash_func_num * sizeof(uint32_t), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&rehash_times, device_rehash_times, sizeof(int), cudaMemcpyDeviceToHost);
+    // deal rehash
+    if (rehash_times > 0)
+    {
+        // free device memory
+        cudaFree(device_keys);
+        cudaFree(device_data);
+        cudaFree(device_hash_func_seeds);
+        cudaFree(device_rehash_times);
+        // rehash
+        int level_beneath = this->rehash(key, size, depth + 1);
+        if (level_beneath == ERR_DEPTH)
+        {
+            return ERR_DEPTH;
+        }
+        else
+        {
+            return level_beneath + 1;
+        }
+    }
+    else
+    {
+        // copy the data this is only thing we need
+        cudaMemcpy(this->data, device_data, this->size * hash_func_num * sizeof(uint32_t), cudaMemcpyDeviceToHost);
+        // free device memory
+        cudaFree(device_keys);
+        cudaFree(device_data);
+        cudaFree(device_hash_func_seeds);
+        cudaFree(device_rehash_times);
+        return 0;
+    }
+}
+
+int CuckooCudaHashTable::rehash(uint32_t *key, uint32_t size, uint32_t depth)
+{
+    // if depth > MAX_DEPTH, return ERR_DEPTH and abort
+    if (depth > MAX_DEPTH)
+    {
+        return ERR_DEPTH;
+    }
+    // regenerate hash function seeds
+    this->gen_hash_func_seeds();
+    // save old data to val_buffer
+    std::vector<uint32_t> val_buffer;
+
+    for (int i = 0; i < this->hash_func_num; i++)
+    {
+        for (int j = 0; j < this->size; j++)
+        {
+            int idx = i * this->size + j;
+            uint32_t cur_key = getkey(data[idx], this->pos_width);
+            if (cur_key != EMPTY_CELL)
+            {
+                val_buffer.push_back(cur_key);
+            }
+            data[idx] = EMPTY_CELL;
+        }
+    }
+    // insert all the new keys in val_buffer
+    for (int i = 0; i < size; i++)
+    {
+        val_buffer.push_back(key[i]);
+    }
+    int level_beneath = this->cuckoo_insert(val_buffer.data(), val_buffer.size(), depth);
+    if (level_beneath == ERR_DEPTH)
+    {
+        return ERR_DEPTH;
+    }
+    else
+    {
+        return level_beneath;
+    }
+}
+
+void CuckooCudaHashTable::gen_hash_func_seeds()
+{
+    // generate hash function seeds
+    std::mt19937 mt(time(nullptr));
+    for (uint32_t i = 0; i <= hash_func_num; i++)
+    {
+        hash_func_seeds[i] = mt();
+        // printf("hash seed %u\n", hash_func_seeds[i]);
+    }
+}
+#endif
